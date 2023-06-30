@@ -33,6 +33,7 @@ contract WESale is Ownable, EIP712 {
     uint256 public totalInvest;
     uint256 public totalPresale;
     bool internal isCancel = false;
+    bool internal canUpdate = true;
 
     uint24 public constant FEE = 30000;
     uint24 public constant URGENT_DIVEST_FEE = 100000;
@@ -52,7 +53,7 @@ contract WESale is Ownable, EIP712 {
     );
     event FounderDivest(address _sender, uint256 _amount, uint256 _timestamp);
     event Invest(address _sender, uint256 _amount, uint256 _timestamp);
-    event ClaimInvest(address _sender, uint256 _amount, uint256 _timestamp);
+    // event ClaimInvest(address _sender, uint256 _amount, uint256 _timestamp);
     event ClaimPresale(address _sender, uint256 _amount, uint256 _timestamp);
     event CancelFounderReturn(
         address _sender,
@@ -68,6 +69,7 @@ contract WESale is Ownable, EIP712 {
         uint256 _amountB,
         uint256 _timestamp
     );
+    event UpdateEndedAt(uint256 _timestamp);
 
     uint private unlocked = 0;
 
@@ -99,7 +101,22 @@ contract WESale is Ownable, EIP712 {
         parameters = _parameters;
     }
 
+    function updateEndedAt(uint256 _endedAt) external onlyOwner {
+        if (_isEnded() || !_canUpdate() || _isCancel()) {
+            revert EditingIsCurrentlyNotAllowed();
+        }
+        if (parameters.endedAt > _endedAt) {
+            revert MustAfterOld();
+        }
+        parameters.endedAt = _endedAt;
+        canUpdate = false;
+        emit UpdateEndedAt(_endedAt);
+    }
+
     function invest(uint256 investAmount) external payable lock {
+        if (_isCancel()) {
+            revert HasBeenCanceled();
+        }
         // (uint256 presaleAmount, ) = getAmount(0, investAmount);
         if (parameters.hardCap == totalInvest) {
             revert InvestmentClosed();
@@ -165,6 +182,9 @@ contract WESale is Ownable, EIP712 {
         bytes calldata _data,
         bytes calldata _signature
     ) external lock onlyOwner {
+        if (_isCancel()) {
+            revert HasBeenCanceled();
+        }
         if (parameters.router == address(0)) {
             revert NotAnAutoListingLaunchPad();
         }
@@ -243,11 +263,11 @@ contract WESale is Ownable, EIP712 {
         _claimPresaleAmount(_msgSender(), returnPresaleAmount);
         unlockedAt = block.timestamp;
 
-        emit ClaimInvest(
-            teamWallet,
-            _investTransferTeamAmount,
-            block.timestamp
-        );
+        // emit ClaimInvest(
+        //     teamWallet,
+        //     _investTransferTeamAmount,
+        //     block.timestamp
+        // );
         emit ClaimPresale(_msgSender(), returnPresaleAmount, block.timestamp);
         emit TransferLP(
             _msgSender(),
@@ -259,6 +279,9 @@ contract WESale is Ownable, EIP712 {
     }
 
     function claimInvest() external lock onlyOwner {
+        if (_isCancel()) {
+            revert HasBeenCanceled();
+        }
         if (parameters.router != address(0)) {
             revert IsAnAutoListingLaunchPad();
         }
@@ -278,12 +301,21 @@ contract WESale is Ownable, EIP712 {
         _claimInvestAmount(feeTo, fee);
         _claimInvestAmount(teamWallet, investAmount);
         unlockedAt = block.timestamp;
-        emit ClaimInvest(teamWallet, investAmount, block.timestamp);
+        // emit ClaimInvest(teamWallet, investAmount, block.timestamp);
     }
 
+    // function test() external {
+    //     // investBalances[_msgSender()] = 100_000_000_000_000_000;
+    //     // totalInvest = 100_000_000_000_000_000;
+    //     unlockedAt = block.timestamp;
+    // }
+
     function claimPresale() external lock {
+        if (_isFailed() || unlockedAt == 0) {
+            revert PresaleNotCompleted();
+        }
         // uint256 share = _balance.div(totalInvest);
-        (uint256 canClaim, uint256 canClaimTotal) = getCanClaimTotal();
+        (uint256 canClaimTotal, uint256 canClaim) = getCanClaimTotal();
         if (canClaim > 0) {
             claimed[_msgSender()] = canClaimTotal;
             _claimPresaleAmount(_msgSender(), canClaim);
@@ -328,8 +360,8 @@ contract WESale is Ownable, EIP712 {
         }
         isCancel = true;
         _claimPresaleAmount(_msgSender(), totalPresale);
-        emit CancelFounderReturn(_msgSender(), totalPresale, block.timestamp);
         emit Cancel(block.timestamp);
+        emit CancelFounderReturn(_msgSender(), totalPresale, block.timestamp);
     }
 
     function getTotalReleased() public view returns (uint256) {
@@ -406,9 +438,11 @@ contract WESale is Ownable, EIP712 {
             revert InsufficientInvestBalance();
         }
         investBalances[_msgSender()] = 0;
-        totalInvest = totalInvest.sub(_balance);
         _claimInvestAmount(_msgSender(), _balance);
-        emit ParticipantDivest(_msgSender(), _balance, block.timestamp);
+        if (!_isCancel()) {
+            totalInvest = totalInvest.sub(_balance);
+            emit ParticipantDivest(_msgSender(), _balance, block.timestamp);
+        }
     }
 
     function _urgentDivest() internal {
@@ -416,10 +450,15 @@ contract WESale is Ownable, EIP712 {
         if (_balance == 0) {
             revert InsufficientInvestBalance();
         }
-        _balance = _balance.mul(URGENT_DIVEST_FEE).div(1000000);
+        uint256 _fee = _balance.mul(URGENT_DIVEST_FEE).div(1000000);
         investBalances[_msgSender()] = 0;
-        uint256 returnInvest = totalInvest.sub(_balance);
-        totalInvest = _balance;
+        uint256 returnInvest = _balance.sub(_fee);
+        totalInvest = totalInvest.sub(_balance);
+
+        IWESaleFactory _factory = IWESaleFactory(factory);
+        address feeTo = _factory.feeTo();
+        _claimInvestAmount(feeTo, _fee);
+
         _claimInvestAmount(_msgSender(), returnInvest);
         emit ParticipantDivest(_msgSender(), returnInvest, block.timestamp);
     }
@@ -506,5 +545,9 @@ contract WESale is Ownable, EIP712 {
 
     function _isFailed() public view returns (bool) {
         return _isEnded() && totalInvest < parameters.softCap;
+    }
+
+    function _canUpdate() public view returns (bool) {
+        return canUpdate;
     }
 }
