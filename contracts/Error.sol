@@ -8,11 +8,16 @@ error InsufficientAllowedPresaleAmount();
 error InsufficientPresaleBalance();
 error InsufficientAllowedInvestAmount();
 error InsufficientInvestBalance();
+error UnsupportedDexRouter();
 
+error LTMinimumInvestment();
+error GTMaximumInvestment();
 error InvestmentClosed();
 error InvestmentIsNotClosed();
 error DidNotMeetDivestmentRequirements();
 
+error SaleCompleted();
+error HasBeenCanceled();
 error IllegalOperation();
 error Locked();
 
@@ -28,3 +33,6 @@ error TransferAllowedInvestAmount();
 error TransferInvestBalance();
 error TransferLiquidityFailed();
 error TransferLiquiditySignatureVerificationFailed();
+
+error EditingIsCurrentlyNotAllowed();
+error MustAfterOld();

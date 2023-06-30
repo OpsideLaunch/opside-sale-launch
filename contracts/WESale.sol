@@ -3,14 +3,14 @@ pragma solidity ^0.8.9;
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
 import "./Error.sol";
 import "./interfaces/IWESaleFactory.sol";
 
 struct Parameters {
     uint256 price;
-    uint256 liquidityRate;
+    uint24 liquidityRate;
     uint256 minInvest;
     uint256 maxInvest;
     uint256 softCap;
@@ -19,22 +19,24 @@ struct Parameters {
     uint256 dexInitPrice;
     uint256 startedAt;
     uint256 endedAt;
-    uint256 firstRelease;
-    uint256 cycle;
-    uint256 cycleRelease;
+    uint24 firstRelease;
+    uint24 cycle;
+    uint24 cycleRelease;
+    uint24 investTokenDecimals;
 }
 
 contract WESale is Ownable, EIP712 {
-    using SafeMath for uint256;
+    using SafeMath for uint;
     // uint256 private presaleReserve;
     // uint256 private investReserve;
-    string public name;
-    string public version;
     uint256 public unlockedAt;
     uint256 public totalInvest;
     uint256 public totalPresale;
+    bool internal isCancel = false;
+    bool internal canUpdate = true;
 
     uint24 public constant FEE = 30000;
+    uint24 public constant URGENT_DIVEST_FEE = 100000;
     address public immutable factory;
     address public immutable presaleToken;
     address public immutable investToken;
@@ -44,15 +46,40 @@ contract WESale is Ownable, EIP712 {
     mapping(address => uint256) private investBalances;
     mapping(address => uint256) private claimed;
 
-    uint private unlocked = 1;
+    event ParticipantDivest(
+        address _sender,
+        uint256 _amount,
+        uint256 _timestamp
+    );
+    event FounderDivest(address _sender, uint256 _amount, uint256 _timestamp);
+    event Invest(address _sender, uint256 _amount, uint256 _timestamp);
+    // event ClaimInvest(address _sender, uint256 _amount, uint256 _timestamp);
+    event ClaimPresale(address _sender, uint256 _amount, uint256 _timestamp);
+    event CancelFounderReturn(
+        address _sender,
+        uint256 _amount,
+        uint256 _timestamp
+    );
+    event CancelReturn(address _sender, uint256 _amount, uint256 _timestamp);
+    event Cancel(uint256 _timestamp);
+    event TransferLP(
+        address _sender,
+        address _router,
+        uint256 _amountA,
+        uint256 _amountB,
+        uint256 _timestamp
+    );
+    event UpdateEndedAt(uint256 _timestamp);
+
+    uint private unlocked = 0;
 
     modifier lock() {
         if (unlocked == 1) {
             revert Locked();
         }
-        unlocked = 0;
-        _;
         unlocked = 1;
+        _;
+        unlocked = 0;
     }
 
     constructor(
@@ -62,13 +89,10 @@ contract WESale is Ownable, EIP712 {
         address _teamWallet,
         address _presaleToken,
         address _investToken,
-        uint256 _deposit
+        uint256 _deposit,
+        Parameters memory _parameters
     ) EIP712(_name, _version) {
-        Parameters memory _parameters;
-
         _transferOwnership(_owner);
-        name = _name;
-        name = _version;
         factory = _msgSender();
         teamWallet = _teamWallet;
         presaleToken = _presaleToken;
@@ -77,12 +101,37 @@ contract WESale is Ownable, EIP712 {
         parameters = _parameters;
     }
 
-    function invest(uint256 presaleAmount) external payable lock {
-        (, uint256 investAmount) = getAmount(presaleAmount, 0);
-        if (parameters.hardCap == totalInvest) {}
-        // (, uint256 _investReserve ) = getReserves();
-        uint256 allowInvestAmount = parameters.hardCap.mul(totalInvest);
-        if (allowInvestAmount < presaleAmount) {
+    function updateEndedAt(uint256 _endedAt) external onlyOwner {
+        if (_isEnded() || !_canUpdate() || _isCancel()) {
+            revert EditingIsCurrentlyNotAllowed();
+        }
+        if (parameters.endedAt > _endedAt) {
+            revert MustAfterOld();
+        }
+        parameters.endedAt = _endedAt;
+        canUpdate = false;
+        emit UpdateEndedAt(_endedAt);
+    }
+
+    function invest(uint256 investAmount) external payable lock {
+        if (_isCancel()) {
+            revert HasBeenCanceled();
+        }
+        // (uint256 presaleAmount, ) = getAmount(0, investAmount);
+        if (parameters.hardCap == totalInvest) {
+            revert InvestmentClosed();
+        }
+        if (investAmount < parameters.minInvest) {
+            revert LTMinimumInvestment();
+        }
+        uint256 _senderTotalInvest = investBalances[_msgSender()].add(
+            investAmount
+        );
+        if (_senderTotalInvest > parameters.maxInvest) {
+            revert GTMaximumInvestment();
+        }
+
+        if (parameters.hardCap < investAmount.add(totalInvest)) {
             revert InvalidNumber("AIA", investAmount);
         }
         if (_isNative()) {
@@ -95,7 +144,9 @@ contract WESale is Ownable, EIP712 {
             if (_investToken.allowance(_msgSender(), wesale) < investAmount) {
                 revert InsufficientAllowedInvestAmount();
             }
-            if (_investToken.transferFrom(_msgSender(), wesale, investAmount)) {
+            if (
+                !_investToken.transferFrom(_msgSender(), wesale, investAmount)
+            ) {
                 revert InsufficientInvestBalance();
             }
         }
@@ -103,14 +154,16 @@ contract WESale is Ownable, EIP712 {
             investAmount
         );
         totalInvest = totalInvest.add(investAmount);
+        emit Invest(_msgSender(), investAmount, block.timestamp);
     }
 
     function divest() external lock {
-        if (
-            totalInvest < parameters.softCap ||
-            (!_isEnded() && totalInvest < parameters.hardCap)
-        ) {
+        if (_isFailed() || _isCancel()) {
             _divest();
+            return;
+        }
+        if (!_isEnded()) {
+            _urgentDivest();
             return;
         }
         revert DidNotMeetDivestmentRequirements();
@@ -118,9 +171,10 @@ contract WESale is Ownable, EIP712 {
 
     function founderDivest() external lock onlyOwner {
         if (_isFailed()) {
-            revert DidNotMeetDivestmentRequirements();
+            _founderDivest();
+            return;
         }
-        _founderDivest();
+        revert DidNotMeetDivestmentRequirements();
     }
 
     function transferLiquidity(
@@ -128,13 +182,18 @@ contract WESale is Ownable, EIP712 {
         bytes calldata _data,
         bytes calldata _signature
     ) external lock onlyOwner {
+        if (_isCancel()) {
+            revert HasBeenCanceled();
+        }
         if (parameters.router == address(0)) {
             revert NotAnAutoListingLaunchPad();
         }
-        if (
-            totalInvest < parameters.softCap ||
-            (totalInvest < parameters.hardCap && !_isEnded())
-        ) {
+
+        if (unlockedAt != 0) {
+            revert SaleCompleted();
+        }
+
+        if (!_isEnded() || (_isEnded() && totalInvest < parameters.softCap)) {
             revert PresaleNotCompleted();
         }
 
@@ -164,14 +223,19 @@ contract WESale is Ownable, EIP712 {
         ) = getTransferLiquidityInvestAmount();
         address feeTo = _factory.feeTo();
 
-        totalPresale = totalPresale.sub(_amountA);
-
         uint256 amountA = _amountA;
         uint256 amountB = _investTransferLPAmount;
         bytes calldata data = _data;
 
         IERC20 _investToken = IERC20(investToken);
         IERC20 _presaleToken = IERC20(presaleToken);
+        uint256 lockPresaleAmount = totalInvest.mul(parameters.price).div(
+            10 ** parameters.investTokenDecimals
+        );
+        uint256 returnPresaleAmount = totalPresale.sub(amountA).sub(
+            lockPresaleAmount
+        );
+        totalPresale = lockPresaleAmount;
 
         bool success = _presaleToken.approve(parameters.router, amountA);
         if (!success) {
@@ -196,18 +260,39 @@ contract WESale is Ownable, EIP712 {
         }
         _claimInvestAmount(feeTo, _fee);
         _claimInvestAmount(teamWallet, _investTransferTeamAmount);
+        _claimPresaleAmount(_msgSender(), returnPresaleAmount);
         unlockedAt = block.timestamp;
+
+        // emit ClaimInvest(
+        //     teamWallet,
+        //     _investTransferTeamAmount,
+        //     block.timestamp
+        // );
+        emit ClaimPresale(_msgSender(), returnPresaleAmount, block.timestamp);
+        emit TransferLP(
+            _msgSender(),
+            parameters.router,
+            amountA,
+            amountB,
+            block.timestamp
+        );
     }
 
-    function cliamInvest() external lock onlyOwner {
+    function claimInvest() external lock onlyOwner {
+        if (_isCancel()) {
+            revert HasBeenCanceled();
+        }
         if (parameters.router != address(0)) {
             revert IsAnAutoListingLaunchPad();
         }
         if (_isFailed()) {
             revert ClaimInvestError();
         }
-        if (!_isEnded() || totalInvest != parameters.hardCap) {
+        if (!_isEnded() || totalInvest < parameters.softCap) {
             revert InvestmentIsNotClosed();
+        }
+        if (unlockedAt != 0) {
+            revert SaleCompleted();
         }
         IWESaleFactory _factory = IWESaleFactory(factory);
         address feeTo = _factory.feeTo();
@@ -215,28 +300,72 @@ contract WESale is Ownable, EIP712 {
         uint256 investAmount = totalInvest.sub(fee);
         _claimInvestAmount(feeTo, fee);
         _claimInvestAmount(teamWallet, investAmount);
+        unlockedAt = block.timestamp;
+        // emit ClaimInvest(teamWallet, investAmount, block.timestamp);
     }
 
+    // function test() external {
+    //     // investBalances[_msgSender()] = 100_000_000_000_000_000;
+    //     // totalInvest = 100_000_000_000_000_000;
+    //     unlockedAt = block.timestamp;
+    // }
+
     function claimPresale() external lock {
+        if (_isFailed() || unlockedAt == 0) {
+            revert PresaleNotCompleted();
+        }
+        // uint256 share = _balance.div(totalInvest);
+        (uint256 canClaimTotal, uint256 canClaim) = getCanClaimTotal();
+        if (canClaim > 0) {
+            claimed[_msgSender()] = canClaimTotal;
+            _claimPresaleAmount(_msgSender(), canClaim);
+            emit ClaimPresale(_msgSender(), canClaim, block.timestamp);
+        }
+    }
+
+    function getCanClaimTotal() public view returns (uint256, uint256) {
         uint256 _balance = investBalances[_msgSender()];
         if (_balance == 0) {
             revert InsufficientInvestBalance();
         }
         uint256 totalReleased = getTotalReleased();
-        uint256 share = _balance.div(totalInvest);
-        uint256 canClaimTotal = totalReleased.mul(share).div(1000000);
-        if (canClaimTotal > 0) {
-            uint256 _claimed = claimed[_msgSender()];
-            uint256 canClaim = canClaimTotal.sub(_claimed);
-            if (canClaim > 0) {
-                claimed[_msgSender()] = canClaimTotal;
-                _claimPresaleAmount(_msgSender(), canClaim);
-            }
+        if (totalReleased == 0) {
+            revert PresaleNotCompleted();
         }
+        // uint256 share = _balance.div(totalInvest);
+        uint256 canClaimTotal = totalPresale
+            .mul(totalReleased)
+            .mul(_balance)
+            .div(totalInvest)
+            .div(1000000);
+
+        uint256 canClaim = 0;
+        if (canClaimTotal > 0) {
+            uint256 _claimed = getClaimedTotal();
+            canClaim = canClaimTotal.sub(_claimed);
+        }
+        return (canClaimTotal, canClaim);
+    }
+
+    function getClaimedTotal() public view returns (uint256) {
+        return claimed[_msgSender()];
+    }
+
+    function cancel() external lock {
+        if (unlockedAt != 0) {
+            revert SaleCompleted();
+        }
+        if (_isCancel()) {
+            revert HasBeenCanceled();
+        }
+        isCancel = true;
+        _claimPresaleAmount(_msgSender(), totalPresale);
+        emit Cancel(block.timestamp);
+        emit CancelFounderReturn(_msgSender(), totalPresale, block.timestamp);
     }
 
     function getTotalReleased() public view returns (uint256) {
-        if (block.timestamp < unlockedAt) {
+        if (unlockedAt == 0 || block.timestamp < unlockedAt) {
             return 0;
         }
         uint256 cycleCount = 0;
@@ -279,11 +408,19 @@ contract WESale is Ownable, EIP712 {
         uint256 investAmount
     ) public view returns (uint256 _presaleAmount, uint256 _investAmount) {
         if (presaleAmount > 0) {
-            investAmount = presaleAmount.mul(parameters.price);
+            investAmount = presaleAmount
+                .mul(10 ** parameters.investTokenDecimals)
+                .div(parameters.price);
         } else {
-            presaleAmount = investAmount.div(parameters.price);
+            presaleAmount = investAmount.mul(parameters.price).div(
+                10 ** parameters.investTokenDecimals
+            );
         }
         return (presaleAmount, investAmount);
+    }
+
+    function getInvestOf(address investor) external view returns (uint256) {
+        return investBalances[investor];
     }
 
     // function getReserves()
@@ -302,10 +439,39 @@ contract WESale is Ownable, EIP712 {
         }
         investBalances[_msgSender()] = 0;
         _claimInvestAmount(_msgSender(), _balance);
+        if (!_isCancel()) {
+            totalInvest = totalInvest.sub(_balance);
+            emit ParticipantDivest(_msgSender(), _balance, block.timestamp);
+        }
+    }
+
+    function _urgentDivest() internal {
+        uint256 _balance = investBalances[_msgSender()];
+        if (_balance == 0) {
+            revert InsufficientInvestBalance();
+        }
+        uint256 _fee = _balance.mul(URGENT_DIVEST_FEE).div(1000000);
+        investBalances[_msgSender()] = 0;
+        uint256 returnInvest = _balance.sub(_fee);
+        totalInvest = totalInvest.sub(_balance);
+
+        IWESaleFactory _factory = IWESaleFactory(factory);
+        address feeTo = _factory.feeTo();
+        _claimInvestAmount(feeTo, _fee);
+
+        _claimInvestAmount(_msgSender(), returnInvest);
+        emit ParticipantDivest(_msgSender(), returnInvest, block.timestamp);
     }
 
     function _founderDivest() internal {
-        _claimInvestAmount(_msgSender(), totalPresale);
+        totalPresale = 0;
+        IERC20 _presaleToken = IERC20(presaleToken);
+        uint256 _presaleTokenAmunt = _presaleToken.balanceOf(address(this));
+        if (_presaleTokenAmunt == 0) {
+            return;
+        }
+        _claimPresaleAmount(_msgSender(), _presaleTokenAmunt);
+        emit FounderDivest(_msgSender(), totalPresale, block.timestamp);
     }
 
     function _claimInvestAmount(address recipient, uint256 _amount) internal {
@@ -357,6 +523,10 @@ contract WESale is Ownable, EIP712 {
         return ECDSA.recover(_hash, _signature) == _signer;
     }
 
+    function _isCancel() public view returns (bool) {
+        return isCancel;
+    }
+
     function _isLive() public view returns (bool) {
         return _isStarted() && !_isEnded();
     }
@@ -366,7 +536,7 @@ contract WESale is Ownable, EIP712 {
     }
 
     function _isEnded() public view returns (bool) {
-        return block.timestamp <= parameters.endedAt;
+        return block.timestamp >= parameters.endedAt;
     }
 
     function _isNative() public view returns (bool) {
@@ -375,5 +545,9 @@ contract WESale is Ownable, EIP712 {
 
     function _isFailed() public view returns (bool) {
         return _isEnded() && totalInvest < parameters.softCap;
+    }
+
+    function _canUpdate() public view returns (bool) {
+        return canUpdate;
     }
 }
