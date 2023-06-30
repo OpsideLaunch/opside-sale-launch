@@ -9,6 +9,7 @@ describe('WESaleFactory', function () {
   const dexRouterSetterBytes = ethers.utils.id('DEX_ROUTER_SETTER_ROLE')
   const dexRouterBytes = ethers.utils.id('DEX_ROUTER')
   const WESaleBytes = ethers.utils.id('WESALES')
+  console.log('adminRoleBytes', adminRoleBytes)
   console.log('dexRouterSetterBytes', dexRouterSetterBytes)
   console.log('dexRouterBytes', dexRouterBytes)
   console.log('WESaleBytes', WESaleBytes)
