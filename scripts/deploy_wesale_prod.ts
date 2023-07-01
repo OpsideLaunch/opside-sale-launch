@@ -2,7 +2,8 @@ import { ethers } from 'hardhat'
 import { ParametersStruct } from '../typechain-types/contracts/WESaleFactory'
 
 async function main() {
-  const routerAddress = '0x0d476148769E4CF5AFFB59e5552cAC8a30D13669'
+  const routerAddress = '0x017dAd2578372CAEE5c6CddfE35eEDB3728544C4' // syscoin pegasys
+  //   const routerAddress = '0x0d476148769E4CF5AFFB59e5552cAC8a30D13669' // rollux pegasys
   const routerZeroAddress = '0x0000000000000000000000000000000000000000'
 
   // feeTod
@@ -12,10 +13,12 @@ async function main() {
   const ownerAddress = '0xAcdC274B853e01e9666E03c662d30A83B8F73080'
 
   const [owner, founder] = await ethers.getSigners()
-
+  //   console.log(owner.address, founder.address)
   const presaleToken = await ethers.getContractAt(
     'TestERC20',
-    '0x4C7Ac2e4AC328BB5162CBB45cC6bEAC910F4d37a'
+    '0x7cd80D52fD832C24D51bB842b7A8D666a9EeCE9F' // syscoin
+    // '0x7cd80D52fD832C24D51bB842b7A8D666a9EeCE9F' // rollux
+    // '0x4C7Ac2e4AC328BB5162CBB45cC6bEAC910F4d37a' // rollux testnet
   )
   const investToken = ethers.utils.getAddress(
     '0x0000000000000000000000000000000000000000'
@@ -23,6 +26,8 @@ async function main() {
 
   const WESaleFactory = await ethers.getContractFactory('WESaleFactory')
   const wesaleFactory = await WESaleFactory.deploy(feeTo, signer)
+  //   272198957858
+  //   2500000000
   await wesaleFactory.deployed()
   console.log(`WESale deployed to ${wesaleFactory.address}`)
   const adminBytes = ethers.utils.id('ADMIN_ROLE')
@@ -33,9 +38,11 @@ async function main() {
     'complete grant routerSetter role to owner: dexRouterSetterBytes: ',
     dexRouterSetterBytes
   )
-  await sleep(5000)
-  await wesaleFactory.grantRole(dexRouterBytes, routerAddress)
-  await wesaleFactory.grantRole(dexRouterBytes, routerZeroAddress)
+  await sleep(600000)
+  await wesaleFactory.connect(owner).grantRole(dexRouterBytes, routerAddress)
+  await wesaleFactory
+    .connect(owner)
+    .grantRole(dexRouterBytes, routerZeroAddress)
   console.log(
     'complete grant router role to routerAddress: dexRouterBytes: ',
     dexRouterBytes
