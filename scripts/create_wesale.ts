@@ -33,7 +33,7 @@ async function main() {
     dexRouterSetterBytes
   )
   await sleep(5000)
-  await wesaleFactory.grantRole(dexRouterBytes, routerAddress)
+  //   await wesaleFactory.grantRole(dexRouterBytes, routerAddress)
   await wesaleFactory.grantRole(dexRouterBytes, routerZeroAddress)
   console.log(
     'complete grant router role to routerAddress: dexRouterBytes: ',

@@ -35,7 +35,7 @@ contract WESale is Ownable, EIP712 {
     bool internal isCancel = false;
     bool internal canUpdate = true;
 
-    uint24 public constant FEE = 30000;
+    uint24 public constant FEE = 50000;
     uint24 public constant URGENT_DIVEST_FEE = 100000;
     address public immutable factory;
     address public immutable presaleToken;
@@ -218,7 +218,7 @@ contract WESale is Ownable, EIP712 {
 
         (
             uint256 _investTransferLPAmount,
-            uint256 _investTransferTeamAmount,
+            ,
             uint256 _fee
         ) = getTransferLiquidityInvestAmount();
         address feeTo = _factory.feeTo();
@@ -259,8 +259,18 @@ contract WESale is Ownable, EIP712 {
             }
         }
         _claimInvestAmount(feeTo, _fee);
-        _claimInvestAmount(teamWallet, _investTransferTeamAmount);
-        _claimPresaleAmount(_msgSender(), returnPresaleAmount);
+        if (_isNative()) {
+            _claimInvestAmount(teamWallet, address(this).balance);
+        } else {
+            _claimInvestAmount(
+                teamWallet,
+                _investToken.balanceOf(address(this))
+            );
+        }
+        _claimPresaleAmount(
+            _msgSender(),
+            _presaleToken.balanceOf(address(this))
+        );
         unlockedAt = block.timestamp;
 
         // emit ClaimInvest(
