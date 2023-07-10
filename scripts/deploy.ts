@@ -7,7 +7,7 @@ async function main() {
   const routerAddress = '0x29f7Ad37EC018a9eA97D4b3fEebc573b5635fA84'
 
   // feeTod
-  const feeTo = '0xa6771e585E91C6ce7D1EeB578EDbe0696d37d962'
+  const feeTo = '0x060E1E1De68631c81C8EA78EFd50aaAFE6eF3177'
   const signer = '0x39AD2809F73086A63Ab2F0D8D689D1cc02579abA'
   const [owner] = await ethers.getSigners()
 
