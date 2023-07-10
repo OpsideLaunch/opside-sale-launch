@@ -2,7 +2,7 @@ import { ethers } from 'hardhat'
 import { ParametersStruct } from '../typechain-types/contracts/WESaleFactory'
 
 async function main() {
-  const routerAddress = '0x4dB158Eec5c5d63F9A09535882b835f36d3fd012' // rollux v3 pegasys
+  const routerAddress = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' // rollux v3 pegasys
   //   const routerAddress = '0x0d476148769E4CF5AFFB59e5552cAC8a30D13669' // rollux pegasys
   //   const routerZeroAddress = '0x0000000000000000000000000000000000000000'
 
@@ -26,7 +26,7 @@ async function main() {
 
   const wesaleFactory = await ethers.getContractAt(
     'WESaleFactory',
-    '0xf97a231da6e5340e3ada60c5798dee26ce0d594c'
+    '0xCd392957586B7bE4Ed3c2E78440DD43bbEdc1C43'
   )
   //   const wesaleFactory = await WESaleFactory.deploy(feeTo, signer)
   //   //   272198957858

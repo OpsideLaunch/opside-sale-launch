@@ -4,14 +4,9 @@
     "abiUrl": "/artifacts/contracts/WESaleFactory.sol/WESaleFactory.json",
     "addresses": [
       {
-        "chainId": 57,
-        "chainName": "Syscoin",
-        "address": "0xBF8650f39C0FB2b1f918f8fdc4Dc4b7803eE4DB7"
-      },
-      {
-        "chainId": 570,
-        "chainName": "Rollux",
-        "address": "0xDf3c6E218171b1a2CA787035CA44c39096724b47"
+        "chainId": 137,
+        "chainName": "Polygon",
+        "address": "0x8ab5971f601087e88a0c3Fd0c12AC5314a10091e"
       }
     ]
   },

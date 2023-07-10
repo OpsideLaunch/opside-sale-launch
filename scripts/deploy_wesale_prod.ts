@@ -3,33 +3,33 @@ import { ParametersStruct } from '../typechain-types/contracts/WESaleFactory'
 
 async function main() {
   const routerAddresses = [
-    '0x017dAd2578372CAEE5c6CddfE35eEDB3728544C4', // syscoin
-    // '0x4dB158Eec5c5d63F9A09535882b835f36d3fd012', // rollux v3
-    // '0x4dB158Eec5c5d63F9A09535882b835f36d3fd012', // rollux testnet v3
-    // '0x29f7Ad37EC018a9eA97D4b3fEebc573b5635fA84', // rollux testnet v2
+    '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', // uniswapV3 polygon and mumbai
     '0x0000000000000000000000000000000000000000',
   ]
 
   // feeTod
-  const feeTo = '0x8FF73f55a5852Bf8301d0c45c39b3AFa4A0035fe'
+  const feeTo = '0x060E1E1De68631c81C8EA78EFd50aaAFE6eF3177'
   const signer = '0x39AD2809F73086A63Ab2F0D8D689D1cc02579abA'
 
   const ownerAddress = '0xAcdC274B853e01e9666E03c662d30A83B8F73080'
 
   const [owner, founder] = await ethers.getSigners()
 
-  const presaleToken = await ethers.getContractAt(
-    'TestERC20',
-    '0x4C7Ac2e4AC328BB5162CBB45cC6bEAC910F4d37a'
-  )
-  const investToken = ethers.utils.getAddress(
-    '0x0000000000000000000000000000000000000000'
-  )
+  //   const presaleToken = await ethers.getContractAt(
+  //     'TestERC20',
+  //     '0x4C7Ac2e4AC328BB5162CBB45cC6bEAC910F4d37a'
+  //   )
+  //   const investToken = ethers.utils.getAddress(
+  //     '0x0000000000000000000000000000000000000000'
+  //   )
 
   const WESaleFactory = await ethers.getContractFactory('WESaleFactory')
   const wesaleFactory = await WESaleFactory.deploy(feeTo, signer)
+  console.log('deploing')
   await wesaleFactory.deployed()
   console.log(`WESale deployed to ${wesaleFactory.address}`)
+
+  await sleep(5000)
   const adminBytes = ethers.utils.id('ADMIN_ROLE')
   const dexRouterBytes = ethers.utils.id('DEX_ROUTER')
   const dexRouterSetterBytes = ethers.utils.id('DEX_ROUTER_SETTER_ROLE')
@@ -38,8 +38,8 @@ async function main() {
     'complete grant routerSetter role to owner: dexRouterSetterBytes: ',
     dexRouterSetterBytes
   )
-  await sleep(600000)
   for (let routerAddress of routerAddresses) {
+    await sleep(5000)
     await wesaleFactory.grantRole(dexRouterBytes, routerAddress)
     console.log('complete grant router role to', dexRouterBytes, routerAddress)
   }
@@ -49,7 +49,7 @@ async function main() {
     'complete grant router role to routerAddress: adminRole: ',
     ownerAddress
   )
-  await sleep(1000)
+  await sleep(5000)
   await wesaleFactory.transferOwnership(ownerAddress)
   console.log('transferOwnership: ', ownerAddress)
   //   await sleep(5000)

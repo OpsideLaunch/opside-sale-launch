@@ -8,7 +8,7 @@ async function main() {
   const routerZeroAddress = '0x0000000000000000000000000000000000000000'
 
   // feeTod
-  const feeTo = '0xc7816AB57762479dCF33185bad7A1cFCb68a7997'
+  const feeTo = '0x060E1E1De68631c81C8EA78EFd50aaAFE6eF3177'
   const signer = '0x39AD2809F73086A63Ab2F0D8D689D1cc02579abA'
   const [owner, founder] = await ethers.getSigners()
 
