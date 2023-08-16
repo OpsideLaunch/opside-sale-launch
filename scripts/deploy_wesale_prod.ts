@@ -44,12 +44,12 @@ async function main() {
     console.log('complete grant router role to', dexRouterBytes, routerAddress)
   }
 
+  await sleep(5000)
   await wesaleFactory.grantRole(adminBytes, ownerAddress)
   console.log(
     'complete grant router role to routerAddress: adminRole: ',
     ownerAddress
   )
-  await sleep(5000)
   await wesaleFactory.transferOwnership(ownerAddress)
   console.log('transferOwnership: ', ownerAddress)
   //   await sleep(5000)
